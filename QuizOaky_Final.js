@@ -1108,24 +1108,40 @@ function flipCamera() {
     else if (pad === 1) str += '===';
     return str;
   }
-
-  function tryDecodeBase64ToJson(payload) {
-    if (!payload) return null;
-    const attempts = [
-      p => { try { return JSON.parse(atob(p)); } catch (e) { return null; } },
-      p => { try { return JSON.parse(atob(decodeURIComponent(p))); } catch (e) { return null; } },
-      p => { try { return JSON.parse(atob(p.replace(/\s+/g, ''))); } catch (e) { return null; } },
-      p => { try { return JSON.parse(atob(fixUrlSafeBase64(p))); } catch (e) { return null; } },
-      p => { try { return JSON.parse(atob(fixUrlSafeBase64(decodeURIComponent(p)))); } catch (e) { return null; } }
-    ];
-    for (let fn of attempts) {
+    // Safer UTF-8 aware base64 helpers for result payloads
+    function safeBtoaUtf8(str) {
       try {
-        const res = fn(payload);
-        if (res) return res;
-      } catch (e) {}
+        return btoa(unescape(encodeURIComponent(str)));
+      } catch (e) {
+        return btoa(str);
+      }
     }
-    return null;
-  }
+  
+    function safeAtobUtf8(str) {
+      try {
+        return decodeURIComponent(escape(atob(str)));
+      } catch (e) {
+        return atob(str);
+      }
+    }
+
+    function tryDecodeBase64ToJson(payload) {
+      if (!payload) return null;
+      const attempts = [
+        p => { try { return JSON.parse(safeAtobUtf8(p)); } catch (e) { return null; } },
+        p => { try { return JSON.parse(safeAtobUtf8(decodeURIComponent(p))); } catch (e) { return null; } },
+        p => { try { return JSON.parse(safeAtobUtf8(p.replace(/\s+/g, ''))); } catch (e) { return null; } },
+        p => { try { return JSON.parse(safeAtobUtf8(fixUrlSafeBase64(p))); } catch (e) { return null; } },
+        p => { try { return JSON.parse(safeAtobUtf8(fixUrlSafeBase64(decodeURIComponent(p)))); } catch (e) { return null; } }
+      ];
+      for (let fn of attempts) {
+        try {
+          const res = fn(payload);
+          if (res) return res;
+        } catch (e) {}
+      }
+      return null;
+    }
 
   function decodeResultFromUrl(text) {
     try {
@@ -1239,14 +1255,22 @@ function flipCamera() {
           ]);
         });
         const totalStudents = collectedResults.length;
-        const averageScore = collectedResults.reduce((sum, r) => sum + r.score, 0) / totalStudents;
-        const averagePercentage = Math.round((averageScore / (questions.length || 1)) * 100);
+        const totalScore = collectedResults.reduce((sum, r) => sum + (Number(r.score) || 0), 0);
+        const averageScore = totalScore / totalStudents;
+        const averagePercentage = Math.round(
+          collectedResults.reduce((sum, r) => {
+            const tq = Number(r.totalQuestions) || 0;
+            const sc = Number(r.score) || 0;
+            return sum + (tq > 0 ? sc / tq : 0);
+          }, 0) / totalStudents * 100
+        );
+
         data.push([]);
         data.push(['Summary Statistics', '', '', '', '']);
         data.push(['Total Students', totalStudents, '', '', '']);
-        data.push(['Average Score', averageScore.toFixed(1), questions.length, `${averagePercentage}%`, '']);
-        data.push(['Highest Score', Math.max(...collectedResults.map(r => r.score)), questions.length, '', '']);
-        data.push(['Lowest Score', Math.min(...collectedResults.map(r => r.score)), questions.length, '', '']);
+        data.push(['Average Score', averageScore.toFixed(1), '', `${averagePercentage}%`, '']);
+        data.push(['Highest Score', Math.max(...collectedResults.map(r => Number(r.score) || 0)), '', '', '']);
+        data.push(['Lowest Score', Math.min(...collectedResults.map(r => Number(r.score) || 0)), '', '', '']);
         const worksheet = XLSX.utils.aoa_to_sheet(data);
         const workbook = XLSX.utils.book_new();
         worksheet['!cols'] = [{wch: 25}, {wch: 10}, {wch: 15}, {wch: 15}, {wch: 20}];
@@ -1274,11 +1298,22 @@ function flipCamera() {
     }
     section.style.display = 'block';
     const total = collectedResults.length;
-    const avg = (collectedResults.reduce((s, r) => s + r.score, 0) / total).toFixed(1);
-    const max = Math.max(...collectedResults.map(r => r.score));
-    const min = Math.min(...collectedResults.map(r => r.score));
-    const avgPct = Math.round((avg / (questions.length || 1)) * 100);
-    const passed = collectedResults.filter(r => (r.score / r.totalQuestions) >= 0.6).length;
+    const totalScore = collectedResults.reduce((s, r) => s + (Number(r.score) || 0), 0);
+    const avgScore = totalScore / total;
+    const avgPct = Math.round(
+      collectedResults.reduce((s, r) => {
+        const tq = Number(r.totalQuestions) || 0;
+        const sc = Number(r.score) || 0;
+        return s + (tq > 0 ? sc / tq : 0);
+      }, 0) / total * 100
+    );
+    const max = Math.max(...collectedResults.map(r => Number(r.score) || 0));
+    const min = Math.min(...collectedResults.map(r => Number(r.score) || 0));
+    const passed = collectedResults.filter(r => {
+      const tq = Number(r.totalQuestions) || 0;
+      const sc = Number(r.score) || 0;
+      return tq > 0 && sc / tq >= 0.6;
+    }).length;
     const content = $('analyticsContent');
     content.innerHTML = `
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
@@ -1287,7 +1322,7 @@ function flipCamera() {
           <div style="color: #1976d2;">Total Students</div>
         </div>
         <div style="padding: 15px; background: #f3e5f5; border-radius: 5px; text-align: center;">
-          <div style="font-size: 2rem; font-weight: bold; color: #9c27b0;">${avg}</div>
+          <div style="font-size: 2rem; font-weight: bold; color: #9c27b0;">${avgScore.toFixed(1)}</div>
           <div style="color: #7b1fa2;">Average Score</div>
         </div>
         <div style="padding: 15px; background: #e8f5e9; border-radius: 5px; text-align: center;">
@@ -1499,43 +1534,44 @@ function flipCamera() {
   }
 
   function pasteQuizCodeFromClipboard() {
-    navigator.clipboard.read().then(items => {
-      items.forEach(item => {
-        item.getType('text/plain').then(blob => {
-          blob.text().then(text => {
-            const quizCodeInput = $('quizCodeInput');
-            if (quizCodeInput) {
-              quizCodeInput.value = text.trim();
-              showAlert('Quiz code pasted successfully!', 'success');
-            }
-          });
-        }).catch(() => {
-          // Try alternative method
-          navigator.clipboard.readText().then(text => {
-            const quizCodeInput = $('quizCodeInput');
-            if (quizCodeInput) {
-              quizCodeInput.value = text.trim();
-              showAlert('Quiz code pasted successfully!', 'success');
-            }
-          }).catch(err => {
-            showAlert('Could not read clipboard. Please manually paste the quiz code.', 'warning');
+    if (!navigator.clipboard) {
+      showAlert('Clipboard not supported. Please manually paste the quiz code.', 'warning');
+      return;
+    }
+
+    const applyText = (text) => {
+      const quizCodeInput = $('quizCodeInput');
+      if (quizCodeInput) {
+        quizCodeInput.value = text.trim();
+        showAlert('Quiz code pasted successfully!', 'success');
+      }
+    };
+
+    if (navigator.clipboard.read) {
+      navigator.clipboard.read().then(items => {
+        items.forEach(item => {
+          item.getType('text/plain').then(blob => {
+            blob.text().then(applyText);
+          }).catch(() => {
+            navigator.clipboard.readText().then(applyText).catch(() => {
+              showAlert('Could not read clipboard. Please manually paste the quiz code.', 'warning');
+            });
           });
         });
+      }).catch(() => {
+        navigator.clipboard.readText().then(applyText).catch(() => {
+          showAlert('Could not read clipboard. Please manually paste the quiz code.', 'warning');
+        });
       });
-    }).catch(() => {
-      // Fallback for browsers that don't support clipboard.read()
-      navigator.clipboard.readText().then(text => {
-        const quizCodeInput = $('quizCodeInput');
-        if (quizCodeInput) {
-          quizCodeInput.value = text.trim();
-          showAlert('Quiz code pasted successfully!', 'success');
-        }
-      }).catch(err => {
+    } else if (navigator.clipboard.readText) {
+      navigator.clipboard.readText().then(applyText).catch(() => {
         showAlert('Could not read clipboard. Please manually paste the quiz code.', 'warning');
       });
-    });
+    } else {
+      showAlert('Clipboard not supported. Please manually paste the quiz code.', 'warning');
+    }
   }
-
+   
   function initializeStudentPanel() {
     const quizInfo = $('quizInfo');
     const startQuizBtn = $('startQuizBtn');
@@ -1683,6 +1719,18 @@ function flipCamera() {
       ${hintHtml}
       ${optionsHtml}
     `;
+    // Initialize language state for this question
+const questionTextEl = currentQuestionDiv.querySelector('.question');
+if (questionTextEl) {
+  questionTextEl.setAttribute('data-language', 'en');
+  questionTextEl.removeAttribute('data-original-text');
+}
+
+// Reset translate button label for each question
+const translateBtn = document.getElementById('translateQuestionBtn');
+if (translateBtn) {
+  translateBtn.textContent = 'Translate Question to Hindi';
+}
 
     // Preload and insert question image (show placeholder on error)
     if (imgSrc) {
@@ -1794,15 +1842,18 @@ function flipCamera() {
     calculateResults();
     generateResultUrl();
   }
-
+  function getActualQuestionIndex(displayIndex) {
+    return shuffleQuestions ? originalQuestionOrder[displayIndex] : displayIndex;
+  }
   function calculateResults() {
     let score = 0;
-    for (let i = 0; i < questions.length; i++) {
-      const displayIndex = i;
-      const qIdx = shuffleQuestions ? originalQuestionOrder[displayIndex] : displayIndex;
-      const correct = questions[qIdx] && questions[qIdx].correctAnswer;
+    for (let displayIndex = 0; displayIndex < questions.length; displayIndex++) {
+      const qIdx = getActualQuestionIndex(displayIndex);
+      const question = questions[qIdx];
+      if (!question) continue;
+      const correct = question.correctAnswer;
       const userAns = studentAnswers[displayIndex];
-      if (userAns !== undefined && correct !== undefined && userAns === correct) score++;
+      if (userAns !== undefined && userAns === correct) score++;
     }
     if ($('scoreCircle')) $('scoreCircle').textContent = `${score}/${questions.length}`;
     const percentage = Math.round((score / (questions.length || 1)) * 100);
@@ -1823,7 +1874,6 @@ function flipCamera() {
     if ($('resultTitle')) $('resultTitle').textContent = title;
     if ($('resultMessage')) $('resultMessage').textContent = message;
   }
-
   // Review Mode
   function toggleReview() {
     const section = $('reviewSection');
@@ -1854,8 +1904,11 @@ function flipCamera() {
   // Generate Result URL
   function generateResultUrl() {
     let score = 0;
-    for (let i = 0; i < questions.length; i++) {
-      if (studentAnswers[i] === questions[i].correctAnswer) score++;
+    for (let displayIndex = 0; displayIndex < questions.length; displayIndex++) {
+      const qIdx = getActualQuestionIndex(displayIndex);
+      const question = questions[qIdx];
+      if (!question) continue;
+      if (studentAnswers[displayIndex] === question.correctAnswer) score++;
     }
     const result = {
       studentName: currentStudentName,
@@ -1866,7 +1919,7 @@ function flipCamera() {
       completedAt: new Date().toISOString()
     };
     try {
-      const encodedResult = btoa(JSON.stringify(result));
+      const encodedResult = safeBtoaUtf8(JSON.stringify(result));
       const currentUrl = window.location.href.split('#')[0];
       const resultUrl = currentUrl + '#result=' + encodeURIComponent(encodedResult);
       const resultEl = $('resultUrl');
@@ -1944,22 +1997,44 @@ function flipCamera() {
         ['Quiz ID', quizId || 'Unknown', '', ''],
         ['Question', 'Your Answer', 'Correct Answer', 'Result']
       ];
-      questions.forEach((question, index) => {
-        const userAnswer = studentAnswers[index] !== undefined ? (question.type === 'tf' ? (studentAnswers[index] === 0 ? 'True' : 'False') : question.options[studentAnswers[index]]) : 'Not answered';
-        const correctAnswer = question.type === 'tf' ? (question.correctAnswer === 0 ? 'True' : 'False') : question.options[question.correctAnswer];
-        const isCorrect = studentAnswers[index] === question.correctAnswer ? 'CORRECT' : 'WRONG';
+
+      for (let displayIndex = 0; displayIndex < questions.length; displayIndex++) {
+        const qIdx = getActualQuestionIndex(displayIndex);
+        const question = questions[qIdx];
+        if (!question) continue;
+
+        const userIndex = studentAnswers[displayIndex];
+        const userAnswer =
+          userIndex !== undefined
+            ? (question.type === 'tf'
+                ? (userIndex === 0 ? 'True' : 'False')
+                : question.options[userIndex])
+            : 'Not answered';
+        const correctAnswer =
+          question.type === 'tf'
+            ? (question.correctAnswer === 0 ? 'True' : 'False')
+            : question.options[question.correctAnswer];
+        const isCorrect = userIndex === question.correctAnswer ? 'CORRECT' : 'WRONG';
+
         data.push([question.question, userAnswer, correctAnswer, isCorrect]);
-      });
+      }
+
       const score = Object.keys(studentAnswers).reduce((acc, key) => {
-        return studentAnswers[key] === questions[key].correctAnswer ? acc + 1 : acc;
+        const displayIndex = Number(key);
+        const qIdx = getActualQuestionIndex(displayIndex);
+        const question = questions[qIdx];
+        if (!question) return acc;
+        return studentAnswers[displayIndex] === question.correctAnswer ? acc + 1 : acc;
       }, 0);
+
       data.push([]);
-      const percentage = Math.round((score/questions.length)*100);
+      const percentage = Math.round((score / questions.length) * 100);
       data.push(['Total Score', score + '/' + questions.length, '', percentage + '%']);
       data.push(['Date Taken', new Date().toLocaleString(), '', '']);
+
       const worksheet = XLSX.utils.aoa_to_sheet(data);
       const workbook = XLSX.utils.book_new();
-      worksheet['!cols'] = [{wch: 50}, {wch: 20}, {wch: 20}, {wch: 15}];
+      worksheet['!cols'] = [{ wch: 50 }, { wch: 20 }, { wch: 20 }, { wch: 15 }];
       XLSX.utils.book_append_sheet(workbook, worksheet, "My Results");
       const fileName = (currentStudentName || 'student') + '_Quiz_Results_' + new Date().toISOString().split('T')[0] + '.xlsx';
       XLSX.writeFile(workbook, fileName);
@@ -1987,6 +2062,103 @@ function flipCamera() {
   }
 
   // Init
+    // --- Simple English → Hindi mini translator (assignment demo) ---
+  // Uses: tokenization, stopword removal, dictionary lookup, Unicode Hindi output.
+
+  const ENGLISH_STOPWORDS = new Set([
+    'the','is','am','are','a','an','of','to','and','in','on','for','with',
+    'your','you','what','which','who','whom','how','where','when','this','that'
+  ]);
+
+  const EN_HI_DICTIONARY = {
+    'what': 'क्या',
+    'is': 'है',
+    'your': 'तुम्हारा',
+    'name': 'नाम',
+    'capital': 'राजधानी',
+    'india': 'भारत',
+    'who': 'कौन',
+    'are': 'हो',
+    'you': 'तुम',
+    'river': 'नदी',
+    'largest': 'सबसे बड़ी',
+    'state': 'राज्य',
+    'hello': 'नमस्ते',
+    'quiz': 'प्रश्नोत्तरी',
+    'question': 'प्रश्न',
+    'city': 'शहर',
+    'country': 'देश'
+  };
+
+  // Tokenize English sentence into lowercase word tokens
+  function tokenizeEnglish(text) {
+    return safe(text)
+      .toLowerCase()
+      .split(/[^a-z]+/)   // split on non-letters
+      .filter(Boolean);
+  }
+
+  // Remove common English stopwords
+  function removeEnglishStopwords(tokens) {
+    return tokens.filter(t => !ENGLISH_STOPWORDS.has(t));
+  }
+
+  // Dictionary-based word translation (English → Hindi)
+  function translateTokensToHindi(tokens) {
+    return tokens.map(t => EN_HI_DICTIONARY[t] || t);
+  }
+
+  // Full pipeline: text → tokens → stopword removal → dictionary lookup → Hindi string
+  function translateEnglishSentenceToHindi(sentence) {
+    const tokens = tokenizeEnglish(sentence);
+    const contentTokens = removeEnglishStopwords(tokens);
+    const translatedTokens = translateTokensToHindi(contentTokens);
+    if (!translatedTokens.length) return '';
+    return translatedTokens.join(' ');
+  }
+
+  // UI handler for the "Translate Question to Hindi" button
+  // UI handler for the "Translate Question to Hindi" button (toggles Hindi/English)
+function translateCurrentQuestionToHindi() {
+  const questionEl = document.querySelector('#currentQuestion .question');
+  const btn = document.getElementById('translateQuestionBtn');
+
+  if (!questionEl) {
+    showAlert('No question to translate right now.', 'warning');
+    return;
+  }
+
+  // Default language is English
+  const currentLang = questionEl.getAttribute('data-language') || 'en';
+
+  // Ensure we always remember the original English version
+  const storedOriginal = questionEl.getAttribute('data-original-text');
+  const originalText = storedOriginal || questionEl.textContent || '';
+  if (!storedOriginal) {
+    questionEl.setAttribute('data-original-text', originalText);
+  }
+
+  if (currentLang === 'en') {
+    // EN → HI
+    const translated = translateEnglishSentenceToHindi(originalText);
+    if (!translated) {
+      showAlert('Could not translate this question (dictionary too small).', 'info');
+      return;
+    }
+    questionEl.textContent = translated;
+    questionEl.setAttribute('data-language', 'hi');
+    if (btn) btn.textContent = 'Translate Question to English';
+  } else {
+    // HI → EN (restore original)
+    if (!storedOriginal) {
+      showAlert('Original English text not found.', 'warning');
+      return;
+    }
+    questionEl.textContent = storedOriginal;
+    questionEl.setAttribute('data-language', 'en');
+    if (btn) btn.textContent = 'Translate Question to Hindi';
+  }
+}
   window.addEventListener('load', function() {
     try {
       loadTheme();
@@ -2163,5 +2335,6 @@ function flipCamera() {
   window.downloadResults = downloadResults;
   window.retakeQuiz = retakeQuiz;
   window.toggleReview = toggleReview;
+  window.translateCurrentQuestionToHindi = translateCurrentQuestionToHindi;
 
 })();
