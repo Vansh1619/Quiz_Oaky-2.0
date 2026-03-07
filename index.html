@@ -67,7 +67,7 @@
             <div id="teacherPanel" class="panel" aria-hidden="true">
                 <button class="btn btn-outline-secondary btn-sm back-btn" onclick="goHome()">Back to Home</button>
                 
-                <div id="shareSection" class="share-section alert alert-success" style="display: none;">
+                <div id="shareSection" class="share-section alert alert-success" style="display: none;" aria-live="polite" role="alert">
                     <h3>Share Quiz Link with Students</h3>
                     <p><strong>Quiz ID:</strong> <span id="displayQuizId">Generating...</span></p>
                     
@@ -77,7 +77,7 @@
                         <button class="btn btn-info btn-lg flex-grow-1" id="qrToggleBtn" onclick="toggleQRCode()">Show QR Code</button>
                     </div>
                     
-                    <div id="qrContainer" style="margin-top: 15px; text-align: center;"></div>
+                    <div id="qrContainer" style="display:none; margin-top: 15px; text-align: center;"></div>
                     
                     <p style="margin-top: 15px; color: #2e7d32; font-weight: bold;">
                         Students will send you their result links automatically after completing the quiz!
@@ -144,8 +144,8 @@
                         <div id="tfOptions" class="form-group" style="display:none;">
                             <label>Select the correct answer:</label>
                             <div style="display: flex; gap: 20px;">
-                                <label><input type="radio" name="tfCorrectOption" value="0"> True</label>
-                                <label><input type="radio" name="tfCorrectOption" value="1"> False</label>
+                                <label><input type="radio" name="tfCorrectOption" value="0" required> True</label>
+                                <label><input type="radio" name="tfCorrectOption" value="1" required> False</label>
                             </div>
                         </div>
                         
@@ -229,83 +229,85 @@
                 
                 <div class="section">
                     <h3>Join a Quiz</h3>
-                    <div class="form-group">
-                        <label>Your Name:</label>
-                        <input type="text" id="studentName" class="form-control" placeholder="Enter your full name" required>
-                    </div>
-                    
-                    <!-- Tabs for different join methods -->
-                    <ul class="nav nav-tabs mb-3" id="joinMethodTabs" role="tablist">
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link active" id="paste-link-tab" data-bs-toggle="tab" data-bs-target="#paste-link" type="button">Paste Link</button>
-                        </li>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="scan-qr-tab" data-bs-toggle="tab" data-bs-target="#scan-qr" type="button">Scan QR Code</button>
-                        </li>
-                    </ul>
-                    
-                    <div class="tab-content" id="joinMethodContent">
-                        <!-- Tab 1: Paste Link -->
-                        <div class="tab-pane fade show active" id="paste-link" role="tabpanel">
-                            <div class="form-group">
-                                <label><strong>Paste Quiz Link</strong></label>
-                                <textarea id="joinCode" class="form-control" placeholder="Paste the complete quiz link your teacher shared..." rows="3"></textarea>
-                                <small class="text-muted d-block mt-2">Your teacher will provide a link starting with 'http://' or 'https://'</small>
+                    <form id="studentJoinForm" onsubmit="joinQuiz(); return false;">
+                        <div class="form-group">
+                            <label>Your Name:</label>
+                            <input type="text" id="studentName" class="form-control" placeholder="Enter your full name" required>
+                        </div>
+                        
+                        <!-- Tabs for different join methods -->
+                        <ul class="nav nav-tabs mb-3" id="joinMethodTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="paste-link-tab" data-bs-toggle="tab" data-bs-target="#paste-link" type="button">Paste Link</button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="scan-qr-tab" data-bs-toggle="tab" data-bs-target="#scan-qr" type="button">Scan QR Code</button>
+                            </li>
+                        </ul>
+                        
+                        <div class="tab-content" id="joinMethodContent">
+                            <!-- Tab 1: Paste Link -->
+                            <div class="tab-pane fade show active" id="paste-link" role="tabpanel">
+                                <div class="form-group">
+                                    <label><strong>Paste Quiz Link</strong></label>
+                                    <textarea id="joinCode" class="form-control" placeholder="Paste the complete quiz link your teacher shared..." rows="3"></textarea>
+                                    <small class="text-muted d-block mt-2">Your teacher will provide a link starting with 'http://' or 'https://'</small>
+                                </div>
+                            </div>
+                            
+                            <!-- Tab 2: Scan QR -->
+                            <div class="tab-pane fade" id="scan-qr" role="tabpanel">
+                                <div class="form-group">
+                                    <label style="font-weight: 600; font-size: 1.1rem;">Point Camera at QR Code</label>
+                                    <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px; line-height: 1.5;">
+                                        Hold your phone steady and point the camera at the QR code. 
+                                        It will automatically detect and fill the code below.
+                                    </p>
+                                    
+                                    <!-- Main Camera Controls -->
+                                    <div class="d-grid gap-2 mb-3">
+                                        <button type="button" class="btn btn-primary btn-lg" id="startCameraBtn" onclick="startQrScanner()" style="font-weight: 600;">
+                                            START CAMERA
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger" id="stopCameraBtn" onclick="stopQrScanner()">
+                                            STOP CAMERA
+                                        </button>
+                                    </div>
+                                    
+                                    <!-- Secondary Controls -->
+                                    <div class="d-flex gap-2 mb-3">
+                                        <button type="button" class="btn btn-sm btn-outline-info flex-grow-1" id="flipCameraBtn" onclick="flipCamera()" style="display:none; font-weight: 600;">
+                                            FLIP CAMERA
+                                        </button>
+                                        <button type="button" class="btn btn-sm btn-outline-warning flex-grow-1" id="torchBtn" onclick="toggleTorch()" style="display:none; font-weight: 600;">
+                                            FLASH
+                                        </button>
+                                    </div>
+                                    
+                                    <!-- QR Reader Display -->
+                                    <div id="qrReader" style="display:none; width:100%; max-width:100%; height:360px; margin: 0 auto 10px; border-radius:12px; overflow:hidden; background:#000; position:relative; border: 3px solid #00F2FE;"></div>
+                                    
+                                    <!-- Status Message -->
+                                    <div id="qrScannerStatus" style="margin: 10px 0; padding: 12px 15px; background: linear-gradient(135deg, #e7f3ff 0%, #f0f8ff 100%); border: 2px solid #00d9ff; border-radius: 8px; color: #003d82; font-size: 0.95rem; display:none; font-weight: 500; line-height: 1.4;">
+                                        CAMERA ACTIVE: Aim the QR code at the center of the screen
+                                    </div>
+                                    
+                                    <!-- Result Display -->
+                                    <textarea id="qrScanResult" class="form-control" placeholder="Scanned QR code will appear here..." rows="2" readonly style="background: #f5f5f5; margin-top: 10px; font-family: monospace;"></textarea>
+                                    
+                                    <!-- Help Text -->
+                                    <small class="text-muted d-block mt-3" style="line-height: 1.6;">
+                                        Tips for best results:<br>
+                                        - Make sure there's good lighting<br>
+                                        - Keep the phone steady<br>
+                                        - Grant camera permission when prompted
+                                    </small>
+                                </div>
                             </div>
                         </div>
                         
-                        <!-- Tab 2: Scan QR -->
-                        <div class="tab-pane fade" id="scan-qr" role="tabpanel">
-    <div class="form-group">
-        <label style="font-weight: 600; font-size: 1.1rem;">Point Camera at QR Code</label>
-        <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px; line-height: 1.5;">
-            Hold your phone steady and point the camera at the QR code. 
-            It will automatically detect and fill the code below.
-        </p>
-        
-        <!-- Main Camera Controls -->
-        <div class="d-grid gap-2 mb-3">
-            <button type="button" class="btn btn-primary btn-lg" id="startCameraBtn" onclick="startQrScanner()" style="font-weight: 600;">
-                START CAMERA
-            </button>
-            <button type="button" class="btn btn-outline-danger" id="stopCameraBtn" onclick="stopQrScanner()">
-                STOP CAMERA
-            </button>
-        </div>
-        
-        <!-- Secondary Controls -->
-        <div class="d-flex gap-2 mb-3">
-            <button type="button" class="btn btn-sm btn-outline-info flex-grow-1" id="flipCameraBtn" onclick="flipCamera()" style="display:none; font-weight: 600;">
-                FLIP CAMERA
-            </button>
-            <button type="button" class="btn btn-sm btn-outline-warning flex-grow-1" id="torchBtn" onclick="toggleTorch()" style="display:none; font-weight: 600;">
-                FLASH
-            </button>
-        </div>
-        
-        <!-- QR Reader Display -->
-        <div id="qrReader" style="display:none; width:100%; max-width:100%; height:360px; margin: 0 auto 10px; border-radius:12px; overflow:hidden; background:#000; position:relative; border: 3px solid #00F2FE;"></div>
-        
-        <!-- Status Message -->
-        <div id="qrScannerStatus" style="margin: 10px 0; padding: 12px 15px; background: linear-gradient(135deg, #e7f3ff 0%, #f0f8ff 100%); border: 2px solid #00d9ff; border-radius: 8px; color: #003d82; font-size: 0.95rem; display:none; font-weight: 500; line-height: 1.4;">
-            CAMERA ACTIVE: Aim the QR code at the center of the screen
-        </div>
-        
-        <!-- Result Display -->
-        <textarea id="qrScanResult" class="form-control" placeholder="Scanned QR code will appear here..." rows="2" readonly style="background: #f5f5f5; margin-top: 10px; font-family: monospace;"></textarea>
-        
-        <!-- Help Text -->
-        <small class="text-muted d-block mt-3" style="line-height: 1.6;">
-            Tips for best results:<br>
-            - Make sure there's good lighting<br>
-            - Keep the phone steady<br>
-            - Grant camera permission when prompted
-        </small>
-    </div>
-</div>
-                    </div>
-                    
-                    <button class="btn btn-primary btn-lg w-100 mt-3" onclick="joinQuiz()" aria-label="Join quiz">Join Quiz</button>
+                        <button class="btn btn-primary btn-lg w-100 mt-3" type="submit" aria-label="Join quiz">Join Quiz</button>
+                    </form>
                     
                     <p style="margin-top: 20px; color: #666; text-align: center; font-size: 0.85rem;">
                         <small>Choose any method: paste link, scan QR, or enter code. After completing, you'll get a result link to share with your teacher!</small>
@@ -356,11 +358,14 @@
                     
                     <div id="currentQuestion" class="question-container"></div>
 
-                    <div class="navigation mt-3">
-                        <button class="btn btn-primary" id="nextBtn" onclick="nextQuestion()">
-                            Next
-                        </button>
-                    </div>
+<div class="navigation mt-3">
+    <button class="btn btn-secondary" id="translateQuestionBtn" onclick="translateCurrentQuestionToHindi()">
+        Translate Question to Hindi
+    </button>
+    <button class="btn btn-primary" id="nextBtn" onclick="nextQuestion()">
+        Next
+    </button>
+</div>
                 </div>
                 
 
