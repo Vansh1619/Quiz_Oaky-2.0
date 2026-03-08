@@ -328,12 +328,6 @@
                     <p id="quizInfo">Loading quiz information...</p>
                     <div id="quizSettings" class="card bg-light mb-3">
                         <div class="card-body">
-                            <div class="form-check mb-2">
-                                <input class="form-check-input" type="checkbox" id="shuffleQuestionsCheck">
-                                <label class="form-check-label" for="shuffleQuestionsCheck">
-                                    Shuffle Questions
-                                </label>
-                            </div>
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="showHintsCheck" checked>
                                 <label class="form-check-label" for="showHintsCheck">
@@ -359,9 +353,12 @@
                     <div id="currentQuestion" class="question-container"></div>
 
 <div class="navigation mt-3">
-    <button class="btn btn-secondary" id="translateQuestionBtn" onclick="translateCurrentQuestionToHindi()">
-        Translate Question to Hindi
-    </button>
+    <label for="translateLangSelect" style="margin-right: 8px;">Language:</label>
+    <select id="translateLangSelect" class="btn btn-secondary" style="padding: 8px 12px; margin-right: 10px;" onchange="translateCurrentQuestion(this.value)">
+        <option value="en">English</option>
+        <option value="hi">हिंदी (Hindi)</option>
+        <option value="gu">ગુજરાતી (Gujarati)</option>
+    </select>
     <button class="btn btn-primary" id="nextBtn" onclick="nextQuestion()">
         Next
     </button>
