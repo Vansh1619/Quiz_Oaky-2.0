@@ -245,6 +245,7 @@
     shuffleQuestions = !shuffleQuestions;
     const btn = $('shuffleBtn');
     if (btn) btn.textContent = `Shuffle: ${shuffleQuestions ? 'ON' : 'OFF'}`;
+    updateShareLink();
     showAlert(`Shuffle ${shuffleQuestions ? 'enabled' : 'disabled'}`, 'info');
   }
 
@@ -383,14 +384,20 @@
   let torchOn = false;
   let scanningStream = null;
   
-  function toggleQRCode() {
+  async function shortenUrlForQR(longUrl) {
+    try {
+      const tinyApi = 'https://tinyurl.com/api-create.php?url=' + encodeURIComponent(longUrl);
+      const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(tinyApi);
+      const res = await fetch(proxyUrl);
+      const short = (await res.text()).trim();
+      if (short && short.startsWith('http') && short.length < longUrl.length) return short;
+    } catch (e) { console.warn('URL shorten failed:', e); }
+    return null;
+  }
+
+  async function toggleQRCode() {
     const container = $('qrContainer');
-    console.log('toggleQRCode invoked');
-    if (!container) {
-      console.warn('toggleQRCode: #qrContainer not found');
-      return;
-    }
-    // If already generated, remove it
+    if (!container) return;
     if (qrGenerated) {
       container.innerHTML = '';
       qrGenerated = false;
@@ -399,69 +406,70 @@
     }
 
     const linkEl = $('quizLink');
-    const link = linkEl ? linkEl.textContent : '';
+    let link = linkEl ? (linkEl.textContent || '').trim() : '';
     if (!link || link.includes('Generating')) {
       showAlert('Generate quiz link first!', 'warning');
       return;
     }
 
-    // Ensure container is visible and create a dedicated inner target for QR rendering
-    // Center the QR visually using flex so it appears in the middle of the container
     container.style.display = 'flex';
     container.style.justifyContent = 'center';
     container.style.alignItems = 'center';
     container.style.minHeight = '360px';
     container.innerHTML = '<div id="qrCanvasDiv" style="display:inline-block; margin:auto;"></div>';
+
     if (typeof QRCode === 'undefined') {
-      console.error('QRCode library not loaded (QRCode is undefined)');
       showAlert('QR generation library not loaded. Please refresh.', 'warning');
       return;
     }
-    try {
-      const target = document.getElementById('qrCanvasDiv');
-      if (!target) throw new Error('qrCanvasDiv target not found');
-      console.log('Generating QR for link length:', (link || '').length);
 
-      // Try a sequence of QR options to MAXIMIZE data capacity.
-      // Primary attempt: force Version 40 (max) with lowest correction (L) and larger canvas for reliability
-      const tryOptions = [];
-      tryOptions.push({ text: link, width: 500, height: 500, typeNumber: 40, correctLevel: (QRCode && QRCode.CorrectLevel) ? QRCode.CorrectLevel.L : undefined });
-      // Secondary large versions (in case 40 fails for library reasons)
-      [30, 20, 10].forEach(tn => tryOptions.push({ text: link, width: 500, height: 500, typeNumber: tn, correctLevel: (QRCode && QRCode.CorrectLevel) ? QRCode.CorrectLevel.L : undefined }));
-      // Fallback: auto version with L correction and reasonable canvas
-      tryOptions.push({ text: link, width: 400, height: 400, correctLevel: (QRCode && QRCode.CorrectLevel) ? QRCode.CorrectLevel.L : undefined });
+    // If link is too long for QR (~2500 chars safe limit), try to shorten it
+    const QR_SAFE_LIMIT = 2500;
+    if (link.length > QR_SAFE_LIMIT) {
+      container.innerHTML = '<div style="padding:20px; text-align:center; color:#666;">Shortening link for QR code...</div>';
+      const shortUrl = await shortenUrlForQR(link);
+      if (shortUrl) {
+        link = shortUrl;
+      } else {
+        container.innerHTML = '';
+        showAlert('Link too long for QR. Use "Copy Link" to share instead.', 'warning');
+        return;
+      }
+      container.innerHTML = '<div id="qrCanvasDiv" style="display:inline-block; margin:auto;"></div>';
+    }
+
+    const targetEl = document.getElementById('qrCanvasDiv');
+    if (!targetEl) return;
+    try {
+      const tryOptions = [
+        { text: link, width: 500, height: 500, typeNumber: 40, correctLevel: (QRCode && QRCode.CorrectLevel) ? QRCode.CorrectLevel.L : undefined },
+        { text: link, width: 500, height: 500, typeNumber: 30, correctLevel: (QRCode && QRCode.CorrectLevel) ? QRCode.CorrectLevel.L : undefined },
+        { text: link, width: 500, height: 500, typeNumber: 20, correctLevel: (QRCode && QRCode.CorrectLevel) ? QRCode.CorrectLevel.L : undefined },
+        { text: link, width: 500, height: 500, typeNumber: 10, correctLevel: (QRCode && QRCode.CorrectLevel) ? QRCode.CorrectLevel.L : undefined },
+        { text: link, width: 400, height: 400, correctLevel: (QRCode && QRCode.CorrectLevel) ? QRCode.CorrectLevel.L : undefined }
+      ];
 
       let created = false;
       let lastError = null;
-      for (let opts of tryOptions) {
+      for (const opts of tryOptions) {
         try {
-          // clean previous content then create
-          target.innerHTML = '';
-          if (typeof QRCode === 'undefined') throw new Error('QRCode lib missing');
-          // Some QR libs accept element or id; pass element for reliability
-          new QRCode(target, opts);
+          targetEl.innerHTML = '';
+          new QRCode(targetEl, opts);
           created = true;
           break;
         } catch (e) {
           lastError = e;
-          console.warn('QRCode attempt failed with opts', opts.typeNumber || 'auto', opts.correctLevel, e && e.message);
           continue;
         }
       }
 
-      if (!created) {
-        console.error('All QR generation attempts failed', lastError);
-        throw lastError || new Error('QR generation failed');
-      }
-
+      if (!created) throw lastError || new Error('QR generation failed');
       qrGenerated = true;
       const btn = $('qrToggleBtn'); if (btn) btn.textContent = 'Hide QR Code';
-      console.log('QR code generated successfully');
     } catch (err) {
-      console.error('Failed to generate QR code', err);
-      // If the payload is very long, provide a helpful hint
-      if (link && link.length > 1200) {
-        showAlert('Quiz link is too long for QR generation. Consider removing hints/images or use Copy Link.', 'warning');
+      console.error('QR generation failed', err);
+      if (link.length > QR_SAFE_LIMIT) {
+        showAlert('Quiz has too many questions for QR. Use Copy Link to share.', 'warning');
       } else {
         showAlert('Failed to generate QR code. Check console for details.', 'warning');
       }
@@ -973,11 +981,11 @@ function flipCamera() {
         try { localStorage.setItem('quiz_id', quizId); } catch (e) {}
       }
       if (displayQuizIdElement) displayQuizIdElement.textContent = quizId;
-      const quizData = { id: quizId, questions: questions, version: '8.0' };
+      const quizData = { id: quizId, questions: questions, version: '8.0', shuffle: shuffleQuestions };
       try {
         // Build a compact representation to reduce payload size for QR codes
         function buildCompact(qd) {
-          const out = { v: qd.version || '8.0', id: qd.id || quizId, qs: [] };
+          const out = { v: qd.version || '8.0', id: qd.id || quizId, qs: [], sh: !!qd.shuffle };
           (qd.questions || []).forEach(q => {
             // type: 'm' = mc, 't' = tf
             const t = q.type === 'tf' ? 't' : 'm';
@@ -994,20 +1002,31 @@ function flipCamera() {
         
         // For QR codes, create a minimal payload (no images) to keep size down
         function buildMinimal(qd) {
-          // Ultra-minimal array format: [id, [[type, q, opts, ans], ...]]
-          // Aggressively truncate to fit 50+ questions in a QR (Version 40, Level L)
+          // Array format: [id, [[type, q, opts, ans], ...], shuffle?]
           const mini = [qd.id || quizId, []];
           (qd.questions || []).forEach(q => {
             const t = q.type === 'tf' ? 't' : 'm';
-            // Keep T/F as very short tokens; truncate options and questions
             const opts = q.type === 'tf' ? ['T','F'] : (q.options || []).map(o => (o || '').substring(0, 40));
-            // Truncate question to 120 chars to reduce payload for 50 questions
             mini[1].push([t, (q.question || '').substring(0, 120), opts, q.correctAnswer || 0]);
           });
+          if (qd.shuffle) mini[2] = 1;
           return mini;
         }
 
+        // Even more compact for 80+ questions – fits in QR when minimal is too large
+        function buildUltraMinimal(qd) {
+          const ultra = [qd.id || quizId, []];
+          (qd.questions || []).forEach(q => {
+            const t = q.type === 'tf' ? 't' : 'm';
+            const opts = q.type === 'tf' ? ['T','F'] : (q.options || []).map(o => (o || '').substring(0, 25));
+            ultra[1].push([t, (q.question || '').substring(0, 70), opts, q.correctAnswer || 0]);
+          });
+          if (qd.shuffle) ultra[2] = 1;
+          return ultra;
+        }
+
         const minimal = buildMinimal(quizData);
+        const ultraMinimal = buildUltraMinimal(quizData);
         const compactJson = JSON.stringify(compact);
         const fullJson = JSON.stringify(quizData);
 
@@ -1026,23 +1045,19 @@ function flipCamera() {
           }
         }
 
-        // Try full payload (includes images) -> compact -> minimal
-        // Threshold is conservative for Version 40 L (~4296 bytes raw). Use encoded length limit.
-        const SIZE_LIMIT = 3800;
+        // Try full -> compact -> minimal -> ultraMinimal (for 80+ questions)
+        // Threshold conservative for QR Version 40 L (~4296 bytes)
+        const SIZE_LIMIT = 3200;
         let safe = null;
-        // try full
         const tryFull = tryCompress(quizData);
-        if (tryFull && tryFull.length <= SIZE_LIMIT) {
-          safe = tryFull;
-        } else {
-          const tryCompact = tryCompress(compact);
-          if (tryCompact && tryCompact.length <= SIZE_LIMIT) {
-            safe = tryCompact;
-          } else {
-            const tryMinimal = tryCompress(minimal);
-            safe = tryMinimal || tryCompact || tryFull;
-          }
-        }
+        const tryCompact = tryCompress(compact);
+        const tryMinimal = tryCompress(minimal);
+        const tryUltra = tryCompress(ultraMinimal);
+        if (tryFull && tryFull.length <= SIZE_LIMIT) safe = tryFull;
+        else if (tryCompact && tryCompact.length <= SIZE_LIMIT) safe = tryCompact;
+        else if (tryMinimal && tryMinimal.length <= SIZE_LIMIT) safe = tryMinimal;
+        else if (tryUltra && tryUltra.length <= SIZE_LIMIT) safe = tryUltra;
+        else safe = tryUltra || tryMinimal || tryCompact || tryFull;
 
         const currentUrl = window.location.href.split('#')[0];
         const quizLink = `${currentUrl}#quiz=${safe}`;
@@ -1389,7 +1404,8 @@ function flipCamera() {
             optionImages: []
           };
         }),
-        version: compact.v || '8.0'
+        version: compact.v || '8.0',
+        shuffle: !!compact.sh
       };
       return expanded;
     }
@@ -1401,7 +1417,7 @@ function flipCamera() {
       
       let id, questions;
       
-      // Check if array format [id, [[type, q, opts, ans], ...]]
+      // Check if array format [id, [[type, q, opts, ans], ...], shuffle?]
       if (Array.isArray(minimal)) {
         id = minimal[0] || 'quiz_' + Date.now();
         questions = minimal[1] || [];
@@ -1414,6 +1430,7 @@ function flipCamera() {
         return null;
       }
 
+      const shuffle = Array.isArray(minimal) ? !!minimal[2] : !!minimal.shuffle;
       const expanded = {
         id: id,
         questions: (questions || []).map((entry, idx) => {
@@ -1430,7 +1447,8 @@ function flipCamera() {
             optionImages: []
           };
         }),
-        version: '8.0'
+        version: '8.0',
+        shuffle: shuffle
       };
       return expanded;
     }
@@ -1516,6 +1534,7 @@ function flipCamera() {
       if (quizData && quizData.questions && quizData.questions.length > 0) {
         questions = quizData.questions;
         quizId = quizData.id || 'quiz_' + Date.now();
+        shuffleQuestions = !!quizData.shuffle;
         currentStudentName = studentName;
         if ($('roleSelection')) $('roleSelection').style.display = 'none';
         if ($('studentJoin')) $('studentJoin').style.display = 'none';
@@ -1608,14 +1627,22 @@ function flipCamera() {
     showAlert('Right-clicking is disabled during the quiz.', 'danger');
   }
 
+  let lastTabSwitchTime = 0;
+  const TAB_SWITCH_DEBOUNCE_MS = 500;
   function handleVisibilityChange() {
     const quizInterface = $('quizInterface');
     if (document.hidden || !document.hasFocus()) {
-      violationCount++;
+      // Debounce: blur + visibilitychange often fire together on Alt+Tab; count as 1 violation
+      const now = Date.now();
+      if (now - lastTabSwitchTime > TAB_SWITCH_DEBOUNCE_MS) {
+        lastTabSwitchTime = now;
+        violationCount++;
+        showAlert('Please stay on the quiz page.', 'warning');
+        escalateViolation();
+      }
       if (quizInterface) quizInterface.classList.add('blurred');
-      showAlert('Please stay on the quiz page.', 'warning');
-      escalateViolation();
     } else {
+      lastTabSwitchTime = Date.now();
       if (quizInterface) quizInterface.classList.remove('blurred');
     }
   }
@@ -1668,7 +1695,7 @@ function flipCamera() {
     const qi = $('quizInterface'); if (qi) qi.style.display = 'block';
     currentQuestionIndex = 0;
     studentAnswers = {};
-    shuffleQuestions = $('shuffleQuestionsCheck')?.checked || false;
+    shuffleQuestions = shuffleQuestions || false;
     showHints = $('showHintsCheck')?.checked !== false;
     if (shuffleQuestions) {
       originalQuestionOrder = [...Array(questions.length).keys()];
@@ -1698,12 +1725,14 @@ function flipCamera() {
     console.log('Question object:', question);
     const currentQuestionDiv = $('currentQuestion');
     const optionsHtml = (function() {
-      if (question.type === 'tf') return `<div class="quiz-options"><div class="quiz-option" data-index="0">True</div><div class="quiz-option" data-index="1">False</div></div>`;
+      if (question.type === 'tf') return `<div class="quiz-options"><div class="quiz-option" data-index="0" data-original-text="True">True</div><div class="quiz-option" data-index="1" data-original-text="False">False</div></div>`;
       let out = '';
       (question.options || []).forEach((option, index) => {
         const optImg = normalizeImageUrl(question.optionImages?.[index] || '');
-        out += `<div class="quiz-option" data-index="${index}">`;
-        out += `${String.fromCharCode(65 + index)}. ${escapeHtml(option)}`;
+        const label = String.fromCharCode(65 + index) + '. ';
+        const fullText = label + (option || '');
+        out += `<div class="quiz-option" data-index="${index}" data-original-text="${escapeHtml(fullText)}">`;
+        out += `${label}${escapeHtml(option)}`;
         if (optImg) out += `<br><img src="${escapeHtml(optImg)}" alt="Option image" onerror="this.style.display='none'" style="max-width: 100%; max-height: 150px; margin-top: 10px; border-radius: 5px;">`;
         out += `</div>`;
       });
@@ -1726,11 +1755,10 @@ if (questionTextEl) {
   questionTextEl.removeAttribute('data-original-text');
 }
 
-// Reset translate button label for each question
-const translateBtn = document.getElementById('translateQuestionBtn');
-if (translateBtn) {
-  translateBtn.textContent = 'Translate Question to Hindi';
-}
+// Keep user's language selection; translate new question if they chose hi/gu
+    const langSelect = document.getElementById('translateLangSelect');
+    const userLang = langSelect ? langSelect.value : 'en';
+    if (userLang !== 'en') translateCurrentQuestion(userLang);
 
     // Preload and insert question image (show placeholder on error)
     if (imgSrc) {
@@ -2061,104 +2089,78 @@ if (translateBtn) {
       .replace(/>/g, '&gt;');
   }
 
-  // Init
-    // --- Simple English → Hindi mini translator (assignment demo) ---
-  // Uses: tokenization, stopword removal, dictionary lookup, Unicode Hindi output.
+  // --- Whole text to text translation (English ↔ Hindi) ---
+  // Uses MyMemory API for full-sentence translation (free, no API key required)
 
-  const ENGLISH_STOPWORDS = new Set([
-    'the','is','am','are','a','an','of','to','and','in','on','for','with',
-    'your','you','what','which','who','whom','how','where','when','this','that'
-  ]);
-
-  const EN_HI_DICTIONARY = {
-    'what': 'क्या',
-    'is': 'है',
-    'your': 'तुम्हारा',
-    'name': 'नाम',
-    'capital': 'राजधानी',
-    'india': 'भारत',
-    'who': 'कौन',
-    'are': 'हो',
-    'you': 'तुम',
-    'river': 'नदी',
-    'largest': 'सबसे बड़ी',
-    'state': 'राज्य',
-    'hello': 'नमस्ते',
-    'quiz': 'प्रश्नोत्तरी',
-    'question': 'प्रश्न',
-    'city': 'शहर',
-    'country': 'देश'
-  };
-
-  // Tokenize English sentence into lowercase word tokens
-  function tokenizeEnglish(text) {
-    return safe(text)
-      .toLowerCase()
-      .split(/[^a-z]+/)   // split on non-letters
-      .filter(Boolean);
-  }
-
-  // Remove common English stopwords
-  function removeEnglishStopwords(tokens) {
-    return tokens.filter(t => !ENGLISH_STOPWORDS.has(t));
-  }
-
-  // Dictionary-based word translation (English → Hindi)
-  function translateTokensToHindi(tokens) {
-    return tokens.map(t => EN_HI_DICTIONARY[t] || t);
-  }
-
-  // Full pipeline: text → tokens → stopword removal → dictionary lookup → Hindi string
-  function translateEnglishSentenceToHindi(sentence) {
-    const tokens = tokenizeEnglish(sentence);
-    const contentTokens = removeEnglishStopwords(tokens);
-    const translatedTokens = translateTokensToHindi(contentTokens);
-    if (!translatedTokens.length) return '';
-    return translatedTokens.join(' ');
-  }
-
-  // UI handler for the "Translate Question to Hindi" button
-  // UI handler for the "Translate Question to Hindi" button (toggles Hindi/English)
-function translateCurrentQuestionToHindi() {
-  const questionEl = document.querySelector('#currentQuestion .question');
-  const btn = document.getElementById('translateQuestionBtn');
-
-  if (!questionEl) {
-    showAlert('No question to translate right now.', 'warning');
-    return;
-  }
-
-  // Default language is English
-  const currentLang = questionEl.getAttribute('data-language') || 'en';
-
-  // Ensure we always remember the original English version
-  const storedOriginal = questionEl.getAttribute('data-original-text');
-  const originalText = storedOriginal || questionEl.textContent || '';
-  if (!storedOriginal) {
-    questionEl.setAttribute('data-original-text', originalText);
-  }
-
-  if (currentLang === 'en') {
-    // EN → HI
-    const translated = translateEnglishSentenceToHindi(originalText);
-    if (!translated) {
-      showAlert('Could not translate this question (dictionary too small).', 'info');
-      return;
+  async function translateText(text, fromLang, toLang) {
+    const pair = fromLang + '|' + toLang;
+    const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=' + pair;
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.responseStatus === 200 && data.responseData && data.responseData.translatedText) {
+        return data.responseData.translatedText;
+      }
+      throw new Error(data.responseDetails || 'Translation failed');
+    } catch (err) {
+      console.error('Translation error:', err);
+      throw err;
     }
-    questionEl.textContent = translated;
-    questionEl.setAttribute('data-language', 'hi');
-    if (btn) btn.textContent = 'Translate Question to English';
-  } else {
-    // HI → EN (restore original)
+  }
+
+  // Translate question and options when language dropdown changes (en / hi / gu)
+  async function translateCurrentQuestion(lang) {
+    const questionEl = document.querySelector('#currentQuestion .question');
+    const langSelect = document.getElementById('translateLangSelect');
+
+    if (!questionEl) return;
+
+    // Store original English text
+    const storedOriginal = questionEl.getAttribute('data-original-text');
+    const originalText = storedOriginal || questionEl.textContent || '';
     if (!storedOriginal) {
-      showAlert('Original English text not found.', 'warning');
+      questionEl.setAttribute('data-original-text', originalText);
+    }
+
+    if (lang === 'en') {
+      // Restore original English
+      questionEl.textContent = originalText;
+      questionEl.setAttribute('data-language', 'en');
+      const optionEls = document.querySelectorAll('#currentQuestion .quiz-option');
+      optionEls.forEach(function(opt) {
+        const orig = opt.getAttribute('data-original-text');
+        if (orig) {
+          const img = opt.querySelector('img');
+          opt.innerHTML = orig + (img ? '<br>' + img.outerHTML : '');
+        }
+      });
       return;
     }
-    questionEl.textContent = storedOriginal;
-    questionEl.setAttribute('data-language', 'en');
-    if (btn) btn.textContent = 'Translate Question to Hindi';
+
+    // Translate to Hindi or Gujarati
+    if (langSelect) { langSelect.disabled = true; }
+    try {
+      const [transQ] = await Promise.all([
+        translateText(originalText, 'en', lang),
+        Promise.all(
+          Array.from(document.querySelectorAll('#currentQuestion .quiz-option')).map(async function(opt) {
+            const orig = opt.getAttribute('data-original-text') || opt.textContent || '';
+            if (!orig) return;
+            const translated = await translateText(orig, 'en', lang);
+            const img = opt.querySelector('img');
+            opt.innerHTML = (translated || orig) + (img ? '<br>' + img.outerHTML : '');
+          })
+        )
+      ]);
+      questionEl.textContent = transQ || originalText;
+      questionEl.setAttribute('data-language', lang);
+    } catch (err) {
+      showAlert('Translation failed. Check your internet connection.', 'warning');
+      if (langSelect) langSelect.value = 'en';
+    } finally {
+      if (langSelect) langSelect.disabled = false;
+    }
   }
-}
   window.addEventListener('load', function() {
     try {
       loadTheme();
@@ -2335,6 +2337,6 @@ function translateCurrentQuestionToHindi() {
   window.downloadResults = downloadResults;
   window.retakeQuiz = retakeQuiz;
   window.toggleReview = toggleReview;
-  window.translateCurrentQuestionToHindi = translateCurrentQuestionToHindi;
+  window.translateCurrentQuestion = translateCurrentQuestion;
 
 })();
